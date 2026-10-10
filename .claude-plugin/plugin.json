@@ -1,0 +1,7 @@
+{
+  "name": "sprout",
+  "version": "1.0.0",
+  "description": "Subagent tracker: a band above the prompt and a panel with each agent's work and the files it touches",
+  "author": { "name": "tum4s" },
+  "types": "./types/index.d.ts"
+}

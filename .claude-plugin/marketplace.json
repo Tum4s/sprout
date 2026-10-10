@@ -1,0 +1,6 @@
+{
+  "name": "tum4s",
+  "description": "Claude Code mods by tum4s",
+  "owner": { "name": "tum4s" },
+  "plugins": [{ "name": "sprout", "source": "./" }]
+}

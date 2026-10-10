@@ -1,0 +1,1 @@
+{ "description": "sprout hooks module", "modules": ["./register.tsx"] }
