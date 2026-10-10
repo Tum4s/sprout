@@ -1,18 +1,56 @@
-# sprout — subagent tracker
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/banner-light.png">
+    <img alt="sprout, a Claude Code mod: watch your subagents work, with live progress, cost, and the files they use" src="docs/brand/banner-dark.png" width="100%">
+  </picture>
+</p>
 
-A Claude Code mod. It stays out of sight until a subagent runs.
+<p align="center">
+  <a href="https://github.com/Tum4s/sprout/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/Tum4s/sprout?style=flat-square&labelColor=14121a&color=6F6A96"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-9A6A5A?style=flat-square&labelColor=14121a"></a>
+  <img alt="Claude Code 2.1.287+" src="https://img.shields.io/badge/Claude%20Code-2.1.287%2B-8A5C78?style=flat-square&labelColor=14121a">
+  <img alt="Runs in the CLI and the Desktop app" src="https://img.shields.io/badge/runs%20in-CLI%20%2B%20Desktop-8C7A52?style=flat-square&labelColor=14121a">
+  <img alt="English and French" src="https://img.shields.io/badge/languages-EN%20%7C%20FR-547E73?style=flat-square&labelColor=14121a">
+</p>
+
+<p align="center">
+  <b>See what your subagents do, cost, and touch.</b>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#what-you-get">What you get</a> ·
+  <a href="#language">Language</a> ·
+  <a href="#progress-bar">Progress bar</a> ·
+  <a href="#known-limits">Known limits</a>
+</p>
+
+---
+
+## What you get
+
+sprout stays out of sight until a subagent runs.
+
+### The band
 
 ![The band above the prompt while a subagent runs](docs/Main_progress_bar.png)
 
+- Shows up above the prompt as soon as a subagent starts.
+- Running agents, an animated progress bar, estimated cost, duration.
+- Leaves one minute after the last agent ends.
+
+### The Agents panel
+
 ![The Agents panel: one card per agent (running, failed, done) and the files they used](docs/Full_Card.png)
 
-- **Band above the prompt** as soon as a subagent starts: running agents, an animated dot-matrix bar, progress, estimated cost, duration. It leaves one minute after the last agent ends.
-- **"Agents ›" button** (or `/sprout`; `/sprout clear` empties it first): a side panel with
-  - one card per agent, with a mascot that walks while it works, turns green when done and red on failure: task, model · effort, bar, steps, context, tokens, cost, duration, the step in progress or last action, then the first line of the final answer;
-  - the tree of the **files the agents read (○) or wrote (●)**; "N files ›" on a card (shown when it narrows the list) filters on that agent, "all" goes back to every file;
-  - the **magnifier** next to "Used files" opens a search field; **Enter** filters on the path shown (relative to the session folder); the magnifier again closes the field and drops the filter (not on mobile, which has no text field);
-  - **git**: inside a repository, a letter after the name follows `git status` (M modified, A added, U untracked, D deleted), read at start, after each agent write and when an agent ends;
-  - **click** a file: it is marked "attached" and handed to Claude with your next message (as hidden context), then the selection empties; "clear" cancels it. **Double-click**: opens it in Notepad, text files only (md, txt, json, csv, log, xml, yaml, toml, ini, sql, src, ts, tsx, py, css, html). Notepad shows any file as text, where the default app could run it (a `.py` runs with Python).
+Open it with **Agents ›** or `/sprout`. `/sprout clear` empties it.
+
+- **One card per agent**: task, model, steps, context, tokens, cost, duration.
+- **A mascot** per agent: walking while it runs, green when done, red on failure.
+- **Used files**: every file the agents read (○) or wrote (●), as a tree.
+- **Filter** on one agent with **N files ›**, or **search** with the magnifier and Enter.
+- **Git marks** in a repository: M modified, A added, U untracked, D deleted.
+- **Click** a file to attach it to your next message. **Double-click** to open it in Notepad.
 
 ## Install
 
@@ -47,7 +85,9 @@ When a subagent starts (forks aside), sprout appends a short note to its brief, 
 - Grep / Glob / Bash show as the "last action", not in the tree.
 - The SVG drawings (dot bars, mascot) exist in the desktop app only; the terminal draws `▄` block bars.
 - **Light theme**: the mods API does not tell the theme, so the SVGs switch colours themselves through `prefers-color-scheme` (solid dots, a 50 to 100 % fade, deeper orange and green).
-- **Double-click** opens files on Windows only (Notepad); network paths are refused.
+- **Double-click** works on Windows only. It opens text files in Notepad (md, txt, json, csv, log, xml, yaml, toml, ini, sql, src, ts, tsx, py, css, html), never in their default app, which could run them. Network paths are refused.
+- **Search** needs a text field, so it is not available on mobile.
+- **Attached files** go to Claude as hidden context with your next message, then the selection empties.
 - Only subagents with a loop id are followed (every local agent has one).
 
 ## Check after an edit
