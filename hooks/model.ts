@@ -144,7 +144,7 @@ const TWINKLES = Array.from(
   (_, i) => `.k${i}{animation:tw ${(1.8 + i * 0.3).toFixed(1)}s linear ${(-i * 0.73).toFixed(2)}s infinite}`,
 ).join('')
 // Fast rise, slower fall, as measured on the app's slider (~150 ms up, ~300 ms down).
-const TWINKLE_CSS = `<style>${TWINKLES}@keyframes tw{0%,60%{fill-opacity:.65}66%{fill-opacity:1}85%,100%{fill-opacity:.65}}@media (prefers-reduced-motion: reduce){rect{animation:none}}</style>`
+const TWINKLE_CSS = `<style>${TWINKLES}@keyframes tw{0%,60%{fill-opacity:.75}66%{fill-opacity:1}85%,100%{fill-opacity:.75}}@media (prefers-reduced-motion: reduce){rect{animation:none}}</style>`
 
 // A light theme: see-through dots wash out on white, so lit dots (the ones with an `opacity`) fill solid and fade
 // in by column tenths, .g0 at 50% to .g9 at 100%, keeping the dark theme's left-to-right ramp; the track gets
@@ -206,7 +206,7 @@ export function dotBarSvg(ratio: number, color: string, isLive: boolean, seed: s
       // g<n>: the column's tenth, for the light theme's ramp; k<n>: one of the twinkle rhythms while live.
       const ramp = `g${Math.min(9, Math.floor((c / cols) * 10))}`
       const classes = isLive ? `${ramp} k${Math.floor(rnd() * 10)}` : ramp
-      dots += `<rect ${at} fill="${color}" opacity="${opacity}" fill-opacity="0.65" class="${classes}"/>`
+      dots += `<rect ${at} fill="${color}" opacity="${opacity}" fill-opacity="0.70" class="${classes}"/>`
     }
   }
   const w = dotBarWidth(cols)
@@ -267,22 +267,6 @@ export function treeRows(files: FileTouch[], root: string): TreeRow[] {
   }
   walk(top, 0, '')
   return rows
-}
-
-/**
- * The pane's totals as a pill: faded orange fill and outline, light orange text (dark theme), about 6.2px per
- * character of 12px system-ui plus 8px of padding each side.
- */
-export function totalsPill(costUsd: number | null, tokens: number): { label: string; source: string; width: number } {
-  const label = [fmtCost(costUsd), `${fmtTokens(tokens)} tk`].filter(Boolean).join('  ·  ')
-  const width = Math.round(16 + label.length * 6.2)
-  const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" viewBox="0 0 ${width} 20">` +
-    `<rect x="0.5" y="0.5" width="${width - 1}" height="19" rx="9.5" fill="#d97757" fill-opacity="0.16" stroke="#d97757" stroke-opacity="0.45"/>` +
-    `<text x="${width / 2}" y="14" text-anchor="middle" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#f0b9a3">${label}</text>` +
-    // A light theme: the pale peach text would vanish on white, a deeper orange reads.
-    `<style>@media (prefers-color-scheme: light){text{fill:#a8482a}}</style></svg>`
-  return { label, source, width }
 }
 
 // --- The agent's mascot (the IT bot, sunset palette): leaf antennas, round head, glowing eyes, walking while it works ---

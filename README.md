@@ -22,6 +22,7 @@
   <a href="#what-you-get">What you get</a> ·
   <a href="#language">Language</a> ·
   <a href="#progress-bar">Progress bar</a> ·
+  <a href="#what-sprout-runs">What sprout runs</a> ·
   <a href="#known-limits">Known limits</a>
 </p>
 
@@ -38,6 +39,7 @@ sprout stays out of sight until a subagent runs.
 - Shows up above the prompt as soon as a subagent starts.
 - Running agents, an animated progress bar, estimated cost, duration.
 - Leaves one minute after the last agent ends.
+- **Hover** it (desktop): the latest agent's current step shows, and the running agents' cards light up in the panel.
 
 ### The Agents panel
 
@@ -45,10 +47,12 @@ sprout stays out of sight until a subagent runs.
 
 Open it with **Agents ›** or `/sprout`. `/sprout clear` empties it.
 
-- **One card per agent**: task, model, steps, context, tokens, cost, duration.
+- **One card per agent**, outlined in its status colour, under *Running* or *Finished*: task, model, steps, tokens, cost, duration.
+- **Session totals** in four tiles: agents, total cost, tokens, time.
+- **Hover** a card (desktop) to see a finished agent's full answer, or a running one's type and start time.
 - **A mascot** per agent: walking while it runs, green when done, red on failure.
 - **Used files**: every file the agents read (○) or wrote (●), as a tree.
-- **Filter** on one agent with **N files ›**, or **search** with the magnifier and Enter.
+- **Filter** on one agent with **N files ›**, or **search** with the magnifier: the tree filters as you type.
 - **Git marks** in a repository: M modified, A added, U untracked, D deleted.
 - **Click** a file to attach it to your next message. **Double-click** to open it in Notepad.
 
@@ -78,10 +82,25 @@ French when your Claude speaks French, English otherwise. sprout reads Claude Co
 
 When a subagent starts (forks aside), sprout appends a short note to its brief, unless the brief already names the tool: load the `mcp__sprout__step` tool, report the plan (`total`, `done: 0`), then each finished step. Nothing to ask; an agent without ToolSearch ignores the note. An agent that never calls it but keeps a todo list (TodoWrite, TaskCreate / TaskUpdate) gets its bar from the ticked tasks; otherwise the bar shows its context fill, in grey. When an agent answers, its bar completes.
 
+## What sprout runs
+
+sprout has no network access and writes no files. It runs three things on your machine:
+
+| What | When | Why |
+|---|---|---|
+| `git rev-parse --show-toplevel` and `git status --porcelain` | At session start, after an agent writes a file, when an agent ends | Git marks. Read-only. |
+| `powershell.exe -NoProfile -Command (Get-UICulture).Name` | At session start, Windows only, when neither the `language` setting nor `LANG` is set | Pick French or English. |
+| `powershell.exe -NoProfile -Command Start-Process notepad.exe` | When you double-click a file | Open it in Notepad. The path goes through an environment variable, not the command line. |
+
+It also adds text to what Claude reads:
+
+- **Each subagent's brief** gets a short note asking it to call `mcp__sprout__step` (see [Progress bar](#progress-bar)). Forks and briefs that already name the tool are left as is.
+- **Your next typed message** carries the paths of the files you clicked, as hidden context. Nothing is added when no file is selected.
+
 ## Known limits
 
 - **Cost is an estimate**: Anthropic's official price table read on 2026-10-09 (`hooks/model.ts`), cache writes at the 1-hour rate (the real duration is not exposed). A model outside the table shows no cost.
-- **Context as a %** only when the agent runs on the session's model (the only window the API exposes); otherwise a token count.
+- **The grey context bar** fills only when the agent runs on the session's model (the only context window the API exposes).
 - Grep / Glob / Bash show as the "last action", not in the tree.
 - The SVG drawings (dot bars, mascot) exist in the desktop app only; the terminal draws `▄` block bars.
 - **Light theme**: the mods API does not tell the theme, so the SVGs switch colours themselves through `prefers-color-scheme` (solid dots, a 50 to 100 % fade, deeper orange and green).

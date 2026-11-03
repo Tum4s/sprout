@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { pickLang } from '../hooks/i18n'
-import { clip, costOf, dotBarHeight, dotBarSvg, dotBarWidth, gitMarks, todoSteps, totalsPill, treeRows } from '../hooks/model'
+import { clip, costOf, dotBarHeight, dotBarSvg, dotBarWidth, gitMarks, todoSteps, treeRows } from '../hooks/model'
 
 const BAND = {
   plugin: 'sprout',
@@ -18,6 +18,9 @@ const PANE = {
   props: { title: 'Agents', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 36 }, view: {} },
 } as const
 
+// The briefs subagents were started with, as the engine received them.
+const spawned: string[] = []
+
 /** Stubs Claude Code's side, starts the session, and returns the mocked clock; `language` is Claude Code's setting. */
 async function session($: any, on: any, language = 'français') {
   const clock = mock.clock(on, { now: 1_000_000 })
@@ -28,7 +31,10 @@ async function session($: any, on: any, language = 'français') {
   on('command.register', () => ({ value: undefined }))
   on('tool.register', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('agent.spawn', ($: any, e: any) => ({ model: 'claude-sonnet-5-5', agentId: e.description === 'Second' ? 'ag2' : 'ag1' }))
+  on('agent.spawn', ($: any, e: any) => {
+    spawned.push(e.prompt)
+    return { model: 'claude-sonnet-5-5', agentId: e.description === 'Second' ? 'ag2' : 'ag1' }
+  })
   on('tool.call', () => ({ result: 'ok' }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine'] }))
@@ -96,7 +102,14 @@ test('a running agent shows in the band, with its steps, files and the pane', as
     expect(await pane.find({ type: 'Text', text: 'Lecture des specs' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'lecture' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: '1/4 étapes' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^ctx 10% {2}· {2}104k tk {2}· {2}≈\$0\.\d\d {2}· {2}0:03$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^104k tk {2}· {2}≈\$0\.\d\d {2}· {2}0:03$/ })).toBeDefined()
+    // Totals in tiles, the running agent under its section.
+    expect(await pane.find({ type: 'Text', text: '1/1 en cours' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Coût total' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'En cours · 1' })).toBeDefined()
+    // The details a hover reveals are drawn on the desktop only.
+    expect(Boolean(await pane.find({ type: 'Text', text: /· démarré à \d\d:\d\d$/ }))).toBe(surface === 'desktop')
+    expect(await pane.find({ type: 'Text', text: /^Terminé/ })).toBeUndefined()
     expect(await pane.find({ key: 'open-C:/work/docs/specs/SPEC_A.md' })).toBeDefined()
     expect(await pane.find({ key: 'open-C:/work/docs/notes.md' })).toBeDefined()
     // Files read by the main conversation are not the agents' files.
@@ -105,6 +118,44 @@ test('a running agent shows in the band, with its steps, files and the pane', as
     expect(await pane.find({ key: 'filter-ag1' })).toBeUndefined()
     await pane.unmount()
   }
+})
+
+test('each subagent is briefed to report its steps, unless it is a fork or already told', async ($, on) => {
+  await session($, on)
+  spawned.length = 0
+  await spawn($, 'Plain', 'tu1')
+  await $.agent.spawn({ tool_use_id: 'tu2', prompt: 'call mcp__sprout__step yourself', description: 'Told', subagentType: 'general-purpose', provider: { plugin: 'engine' }, parentModel: 'claude-sonnet-5-5' } as any)
+  await $.agent.spawn({ tool_use_id: 'tu3', prompt: 'go on', description: 'Fork', subagentType: 'fork', provider: { plugin: 'engine' }, parentModel: 'claude-sonnet-5-5' } as any)
+  expect(spawned).toHaveLength(3)
+  expect(spawned[0]).toContain('select:mcp__sprout__step')
+  expect(spawned[1]).toBe('call mcp__sprout__step yourself')
+  expect(spawned[2]).toBe('go on')
+})
+
+test('without reported steps, a running bar shows the context fill', async ($, on) => {
+  await session($, on)
+  await spawn($, 'Context', 'tu1')
+  // One request on the session's model: 103k tokens of context in a 1M window.
+  await step($, 'ag1')
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const alts = (await pane.findAll({ type: 'Svg' })).map(s => String(s.props.alt))
+  await pane.unmount()
+  expect(alts).toContain('10%')
+})
+
+test('a card bar follows the pane width, within bounds', async ($, on) => {
+  await session($, on)
+  await spawn($, 'Large', 'tu1')
+  const barWidth = async (bodyColumns: number): Promise<unknown> => {
+    const pane = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'desktop' })
+    const svgs = await pane.findAll({ type: 'Svg' })
+    await pane.unmount()
+    return svgs.find(s => /%$/.test(String(s.props.alt)))?.props.width
+  }
+  expect(await barWidth(60)).toBe(dotBarWidth(78))
+  expect(await barWidth(100)).toBe(dotBarWidth(130))
+  expect(await barWidth(10)).toBe(dotBarWidth(40))
+  expect(await barWidth(300)).toBe(dotBarWidth(220))
 })
 
 test('finished agents, the file filter, and the band leaving a minute later', async ($, on) => {
@@ -127,6 +178,9 @@ test('finished agents, the file filter, and the band leaving a minute later', as
   expect(await pane.find({ type: 'Text', text: 'interrompu ou en erreur' })).toBeDefined()
   // An agent that answered without its last step report shows all its steps done.
   expect(await pane.find({ type: 'Text', text: '4/4 étapes' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Terminés · 2' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^En cours/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '2 au total' })).toBeDefined()
   expect(await pane.find({ key: 'open-C:/work/b.md' })).toBeDefined()
   await pane.press({ key: 'filter-ag1' })
   expect(await pane.find({ key: 'open-C:/work/a.md' })).toBeDefined()
@@ -182,6 +236,15 @@ test('a click selects a file for the next message, a double-click opens it', asy
   await clock.advance(400)
   expect(runs.length).toBe(1)
 
+  // Nor a file on a network share.
+  await ($ as any).tool.call({ tool: 'Read', agentId: 'ag1', file_path: '\\\\srv\\share\\notes.md' })
+  const share = (await pane.findAll({ type: 'Button' })).find(b => String(b.key).includes('srv'))?.key
+  expect(share).toBeDefined()
+  await pane.press({ key: share! })
+  await pane.press({ key: share! })
+  await clock.advance(400)
+  expect(runs.length).toBe(1)
+
   // Two different files pressed in a row: both are selected.
   await pane.press({ key: 'open-C:/work/docs/a.md' })
   await pane.press({ key: 'open-C:/work/run.bat' })
@@ -191,7 +254,7 @@ test('a click selects a file for the next message, a double-click opens it', asy
   await pane.unmount()
 })
 
-test('the magnifier opens a search that filters the tree on Enter', async ($, on) => {
+test('the magnifier opens a search that filters the tree as you type', async ($, on) => {
   await session($, on)
   await spawn($, 'Lecture', 'tu1')
   await ($ as any).tool.call({ tool: 'Read', agentId: 'ag1', file_path: 'C:/work/docs/specs/SPEC_A.md' })
@@ -200,17 +263,25 @@ test('the magnifier opens a search that filters the tree on Enter', async ($, on
     const pane = await $.ui.mount({ ...PANE, surface })
     expect(await pane.find({ key: 'files-search' })).toBeUndefined()
     await pane.press({ key: 'search-toggle' })
-    // Typing alone filters nothing: Enter does.
-    await pane.input({ key: 'files-search', text: 'SPEC', kind: 'change' })
+    // Each keystroke filters: no Enter needed.
+    // "e" is in both paths, "SPEC" in one.
+    await pane.input({ key: 'files-search', text: 'e', kind: 'change' })
     expect(await pane.find({ key: 'open-C:/work/README.md' })).toBeDefined()
-    await pane.input({ key: 'files-search', text: 'SPEC', kind: 'submit' })
+    expect(await pane.find({ key: 'open-C:/work/docs/specs/SPEC_A.md' })).toBeDefined()
+    await pane.input({ key: 'files-search', text: 'SPEC', kind: 'change' })
     expect(await pane.find({ key: 'open-C:/work/docs/specs/SPEC_A.md' })).toBeDefined()
     expect(await pane.find({ key: 'open-C:/work/README.md' })).toBeUndefined()
     // The session folder's own name matches nothing: the search reads the shown, relative path.
-    await pane.input({ key: 'files-search', text: 'work', kind: 'submit' })
+    await pane.input({ key: 'files-search', text: 'work', kind: 'change' })
     expect(await pane.find({ type: 'Text', text: 'Aucun fichier ne contient « work ».' })).toBeDefined()
     // The magnifier again closes the field and drops the filter.
     await pane.press({ key: 'search-toggle' })
+    expect(await pane.find({ key: 'files-search' })).toBeUndefined()
+    expect(await pane.find({ key: 'open-C:/work/README.md' })).toBeDefined()
+    // So does Enter (the field's ✕).
+    await pane.press({ key: 'search-toggle' })
+    await pane.input({ key: 'files-search', text: 'SPEC', kind: 'change' })
+    await pane.input({ key: 'files-search', text: 'SPEC', kind: 'submit' })
     expect(await pane.find({ key: 'files-search' })).toBeUndefined()
     expect(await pane.find({ key: 'open-C:/work/README.md' })).toBeDefined()
     await pane.unmount()
@@ -243,7 +314,6 @@ test('git marks parse renames, and light-theme colours ride inside the SVGs', ()
     'c:/work/e.md': 'U',
   })
   expect(dotBarSvg(1, '#7fb88f', false, 's')).toContain('prefers-color-scheme: light')
-  expect(totalsPill(0.5, 1000).source).toContain('prefers-color-scheme: light')
 })
 
 test('an English-speaking Claude gets the mod in English', async ($, on) => {

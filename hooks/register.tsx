@@ -25,7 +25,6 @@ import {
   progressOf,
   todoSteps,
   toolLabel,
-  totalsPill,
   treeRows,
   type Usage,
 } from './model'
@@ -34,10 +33,14 @@ import { pickLang, WORDS, type Words } from './i18n'
 const PANE = 'sprout'
 // The band stays this long after the last agent of a wave finishes.
 const BAND_LINGER_MS = 60_000
-// Dot bars: 5 rows and 200px in the band (as the app's Ultracode slider), 4 rows and 120px on the pane's cards.
+// Dot bars: 5 rows and 200px in the band (as the app's Ultracode slider), 4 rows on the pane's cards.
 const BAND_COLS = 92 // exactly 200px wide
 const BAND_ROWS = 5
-const CARD_COLS = 55 // 120px wide
+// A card's bar follows the pane's width: dot columns per body cell, within bounds (40 dots ≈ 87px, 220 ≈ 480px).
+// ponytail: assumes a desktop cell of about 8px, so the bar takes about 40% of a card; retune if it looks off.
+const CARD_COLS_PER_CELL = 1.3
+const CARD_COLS_MIN = 40
+const CARD_COLS_MAX = 220
 const CARD_ROWS = 4
 // A file touched this recently is drawn at full strength, the others dim.
 const RECENT_MS = 5_000
@@ -85,6 +88,11 @@ const MARK_READ = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" 
 const MARK_WRITE = '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="3.9" fill="#e8a33d"/></svg>'
 // The dot bars are SVG and need real colours: Claude's orange while running, green once done, grey for context.
 const BAR_LIVE = '#d97757'
+// The pane's orange texts on the desktop: Claude's orange, a touch muted (it glared on the dark theme). The API tells
+// no theme, so one colour serves both; it still reads on white.
+const RUN_SOFT = '#c8795e'
+// The hover group of the band and the running agents' cards: hovering one lights the others.
+const LIVE_SCOPE = 'sprout-live'
 const BAR_DONE = '#7fb88f'
 const BAR_CTX = '#808a96'
 // The failed bot's body: a failed bar, track included, takes its red.
@@ -437,6 +445,9 @@ export const register: Register = on => {
     const span = Math.max(...crew.map(a => a.endedAt ?? Math.max(at, a.startedAt))) - Math.min(...crew.map(a => a.startedAt))
     const head = isLive ? t.bandRunning(running.length) : t.bandDone(crew.length)
     const barColor = isLive ? BAR_LIVE : failed ? BAR_FAIL : BAR_DONE
+    // What the latest running agent does, shown on hover.
+    const latest = [...running].sort((a, b) => b.startedAt - a.startedAt)[0]
+    const doing = latest ? latest.stepNote || latest.lastTool || '' : ''
     const [lit, unlit] = blockBar(ratio, 31)
     const bar =
       Svg ? (
@@ -455,7 +466,16 @@ export const register: Register = on => {
     // Other mods' band content stays below ours.
     return (
       <Box flexDirection="column">
-        <Box key="sprout-band" flexDirection="row" alignItems="center" gap={1}>
+        {/* Desktop hover: no tint (the engine's frame around the band has a padding a tint would leave bare); the
+            band only joins the running agents' cards in one hover group, so hovering it lights them. A hover with a
+            scope and no style does not join the group: a fully transparent background keeps it in. */}
+        <Box
+          key="sprout-band"
+          flexDirection="row"
+          alignItems="center"
+          gap={1}
+          {...(Svg ? { hover: { scope: LIVE_SCOPE, backgroundColor: '#00000000' } } : {})}
+        >
           {/* The mascot sums up the wave: walking while agents run, smiling once done, red if one failed. */}
           {Svg ? (
             <Svg source={botSvg(isLive ? 'running' : failed ? 'failed' : 'done')} alt={head} width={BOT_SIZE} height={BOT_SIZE} />
@@ -470,6 +490,14 @@ export const register: Register = on => {
               .filter(Boolean)
               .join('  ·  ')}
           </Text>
+          {/* Hidden until hovered: the latest running agent's step, in the free room before the button. */}
+          {Svg && doing && (
+            <Box display="none" hover={{ display: 'flex' }} flexShrink={1} minWidth={0}>
+              <Text dimColor wrap="truncate-end">
+                · {doing}
+              </Text>
+            </Box>
+          )}
           <Box flexGrow={1} />
           <Button key="sprout-open" label={t.openAgents} plain onPress={() => void openPane($)} />
         </Box>
@@ -494,13 +522,12 @@ export const register: Register = on => {
     const isSearching = await read($, searching)
     const marks = await read($, git)
     const at = await read($, now)
+    const cardCols = Math.max(CARD_COLS_MIN, Math.min(CARD_COLS_MAX, Math.round(e.props.bodyColumns * CARD_COLS_PER_CELL)))
 
     if (list.length === 0) {
       return (
-        <Box flexDirection="column" padding={1}>
-          <Box borderStyle="round" borderDimColor paddingX={1} alignSelf="flex-start">
-            <Text bold>Agents</Text>
-          </Box>
+        <Box flexDirection="column" alignItems="center" padding={1} gap={1}>
+          {Svg && <Svg source={botSvg('done')} alt={t.altDone} width={BOT_SIZE * 3} height={BOT_SIZE * 3} />}
           <Text dimColor>{t.empty}</Text>
         </Box>
       )
@@ -510,9 +537,23 @@ export const register: Register = on => {
     const finished = list.filter(a => a.status !== 'running').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
     const shown = [...running, ...finished].slice(0, MAX_CARDS)
     const hidden = list.length - shown.length
+    const shownRunning = shown.filter(a => a.status === 'running')
+    const shownFinished = shown.filter(a => a.status !== 'running')
     const totalCost = list.reduce<number | null>((s, a) => addCost(s, a.costUsd), 0)
     const totalTokens = list.reduce((s, a) => s + a.tokens, 0)
-    const totals = totalsPill(totalCost, totalTokens)
+    // Wall time from the first agent's start to the last one's end (or now, while one runs).
+    const firstStart = Math.min(...list.map(a => a.startedAt))
+    const waveEnd = running.length ? at : Math.max(...list.map(a => a.endedAt ?? a.startedAt))
+    // The Agents tile says the state at a glance: orange while one runs, red if one failed, green once all are done.
+    const orange = Svg ? RUN_SOFT : RUN
+    // The failed agents' red: on the desktop the cards' red, between the theme's (dark on white, glaring on black).
+    const stateColor = running.length ? orange : list.some(a => a.status === 'failed') ? (Svg ? BAR_FAIL : FAIL) : DONE
+    const tiles: [string, string, string | undefined][] = [
+      ['Agents', running.length ? t.runningOf(running.length, list.length) : t.inTotal(list.length), stateColor],
+      [t.tileCost, fmtCost(totalCost) || '—', orange],
+      [t.tileTokens, fmtTokens(totalTokens), undefined],
+      [t.tileTime, fmtTime(Math.max(0, waveEnd - firstStart)), undefined],
+    ]
 
     const bar = (a: AgentRun): JSX.Element => {
       const progress = progressOf(a)
@@ -523,7 +564,7 @@ export const register: Register = on => {
       const isFailed = a.status === 'failed'
       const color = !isLive ? (isFailed ? BAR_FAIL : BAR_DONE) : progress === null ? BAR_CTX : BAR_LIVE
       if (Svg) {
-        return <Svg source={dotBarSvg(ratio, color, isLive, a.id, CARD_COLS, CARD_ROWS, isFailed ? BAR_FAIL : undefined)} alt={`${Math.round(ratio * 100)}%`} width={dotBarWidth(CARD_COLS)} height={dotBarHeight(CARD_ROWS)} />
+        return <Svg source={dotBarSvg(ratio, color, isLive, a.id, cardCols, CARD_ROWS, isFailed ? BAR_FAIL : undefined)} alt={`${Math.round(ratio * 100)}%`} width={dotBarWidth(cardCols)} height={dotBarHeight(CARD_ROWS)} />
       }
       const [lit, unlit] = blockBar(ratio, 14)
       return (
@@ -536,7 +577,6 @@ export const register: Register = on => {
 
     const card = (a: AgentRun): JSX.Element => {
       const isLive = a.status === 'running'
-      const ctx = contextPct(a)
       const owner = a.id
       const fileCount = touched.filter(f => f.agents.includes(owner)).length
       const isPicked = picked === owner
@@ -549,29 +589,49 @@ export const register: Register = on => {
             : t.done
       const steps = a.stepTotal ? t.steps(a.stepDone ?? 0, a.stepTotal) : ''
       const facts = [
-        ctx !== null ? `ctx ${ctx}%` : '',
         a.tokens ? `${fmtTokens(a.tokens)} tk` : '',
         fmtCost(a.costUsd),
         fmtTime(elapsed(a, at)),
       ].filter(Boolean)
+      const hex = isLive ? BAR_LIVE : a.status === 'failed' ? BAR_FAIL : BAR_DONE
+      // Every card keeps three lines. On the desktop a finished agent's third line (done or failed) is its type and
+      // start time, and its answer or failure shows on hover, in full (a hover can reveal, never hide, so a cut copy
+      // would read twice); a running agent keeps its step in sight, its type and start time show on hover.
+      const answerOnHover = Boolean(Svg && !isLive)
+      // The filter button only when filtering would narrow the list, or to undo a filter.
+      const hasFilter = fileCount > 0 && (fileCount < touched.length || isPicked)
+      const started = new Date(a.startedAt)
+      const clock = `${String(started.getHours()).padStart(2, '0')}:${String(started.getMinutes()).padStart(2, '0')}`
+      // Desktop: the outline at 80% of the bar's colour; under the pointer, full and a light tint. The card filtering
+      // the tree keeps a stronger tint.
+      const look = Svg
+        ? {
+            borderColor: `${hex}cc`,
+            hover: { borderColor: hex, backgroundColor: `${hex}${isPicked ? '1f' : '0b'}`, ...(isLive ? { scope: LIVE_SCOPE } : {}) },
+            ...(isPicked ? { backgroundColor: `${hex}1f` } : {}),
+          }
+        : { borderColor: isLive ? RUN : a.status === 'failed' ? FAIL : DONE }
       return (
-        <Box key={`card-${a.id}`} flexDirection="column" marginTop={1}>
+        <Box key={`card-${a.id}`} flexDirection="column" marginTop={1} paddingX={1} borderStyle="round" overflow="hidden" {...look}>
           <Box flexDirection="row" alignItems="center" gap={1}>
             {Svg ? (
               <Svg source={botSvg(a.status)} alt={isLive ? t.altRunning : a.status === 'failed' ? t.altFailed : t.altDone} width={BOT_SIZE} height={BOT_SIZE} />
             ) : (
               <Text color={isLive ? RUN : a.status === 'failed' ? FAIL : DONE}>{isLive ? '●' : a.status === 'failed' ? '✗' : '✓'}</Text>
             )}
-            <Box flexShrink={1}>
+            {/* minWidth 0: a narrow card cuts its texts (title first, then the model) instead of overflowing. */}
+            <Box flexShrink={1} minWidth={0}>
               <Text bold={isLive} wrap="truncate-end">
                 {a.description || a.type}
               </Text>
             </Box>
             <Box flexGrow={1} />
-            <Text dimColor>
-              {modelName(a.model)}
-              {a.effort ? ` · ${a.effort}` : ''}
-            </Text>
+            <Box flexShrink={2} minWidth={0}>
+              <Text dimColor wrap="truncate-start">
+                {modelName(a.model)}
+                {a.effort ? ` · ${a.effort}` : ''}
+              </Text>
+            </Box>
           </Box>
           <Box flexDirection="row" alignItems="center" gap={1} marginLeft={2}>
             {/* The bar keeps its width in a narrow pane; the facts are cut instead. */}
@@ -581,19 +641,20 @@ export const register: Register = on => {
             {/* Steps right after the bar; context, tokens, cost and time at the far right. */}
             {steps && <Text dimColor>{steps}</Text>}
             <Box flexGrow={1} />
-            <Text dimColor wrap="truncate-start">
-              {facts.join('  ·  ')}
-            </Text>
+            <Box flexShrink={1} minWidth={0}>
+              <Text dimColor wrap="truncate-start">
+                {facts.join('  ·  ')}
+              </Text>
+            </Box>
           </Box>
           <Box flexDirection="row" gap={1} marginLeft={2}>
-            <Box flexShrink={1}>
-              <Text dimColor italic={!isLive} wrap="truncate-end">
-                {clip(detail, DETAIL_MAX)}
+            <Box flexShrink={1} minWidth={0}>
+              <Text dimColor italic={!isLive && !answerOnHover} wrap="truncate-end">
+                {answerOnHover ? t.cardInfo(a.type, clock) : clip(detail, DETAIL_MAX)}
               </Text>
             </Box>
             <Box flexGrow={1} />
-            {/* Only when filtering would narrow the list, or to undo a filter. */}
-            {fileCount > 0 && (fileCount < touched.length || isPicked) && (
+            {hasFilter && (
               <Button
                 key={`filter-${a.id}`}
                 plain
@@ -603,6 +664,14 @@ export const register: Register = on => {
               />
             )}
           </Box>
+          {/* Hidden until the pointer is on the card: the answer of a finished agent, else its type and start time. */}
+          {Svg && (
+            <Box display="none" hover={{ display: 'flex' }} marginLeft={2} marginTop={1}>
+              <Text dimColor italic={answerOnHover}>
+                {answerOnHover ? detail : t.cardInfo(a.type, clock)}
+              </Text>
+            </Box>
+          )}
         </Box>
       )
     }
@@ -627,26 +696,33 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Box flexDirection="row" gap={1} alignItems="center">
-          <Box borderStyle="round" borderDimColor paddingX={1}>
-            <Text bold>Agents</Text>
-          </Box>
-          <Box flexShrink={1}>
-            <Text dimColor wrap="truncate-end">
-              {running.length ? t.runningOf(running.length, list.length) : t.inTotal(list.length)}
-            </Text>
-          </Box>
-          <Box flexGrow={1} />
-          {/* Session totals stand out in a faded orange pill (desktop); plain text on the terminal. */}
-          {Svg ? (
-            <Svg source={totals.source} alt={totals.label} width={totals.width} height={20} />
-          ) : (
-            <Text color={RUN} bold wrap="truncate-start">
-              {totals.label}
-            </Text>
-          )}
+        {/* Session totals in four tiles; a narrow pane wraps them onto two rows. */}
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          {tiles.map(([label, value, color], i) => (
+            <Box key={`tile-${i}`} flexDirection="column" flexGrow={1} borderStyle="round" borderColor="promptBorder" hover={{ borderColor: 'inactive' }} paddingX={1}>
+              <Text dimColor>{label}</Text>
+              <Text bold {...(color ? { color } : {})} wrap="truncate-end">
+                {value}
+              </Text>
+            </Box>
+          ))}
         </Box>
-        {shown.map(card)}
+        {shownRunning.length > 0 && (
+          <Box marginTop={1}>
+            <Text bold color={orange}>
+              {t.sectionRunning(running.length)}
+            </Text>
+          </Box>
+        )}
+        {shownRunning.map(card)}
+        {shownFinished.length > 0 && (
+          <Box marginTop={1}>
+            <Text bold dimColor>
+              {t.sectionDone(finished.length)}
+            </Text>
+          </Box>
+        )}
+        {shownFinished.map(card)}
         {hidden > 0 && (
           <Box marginTop={1}>
             <Text dimColor>
@@ -655,14 +731,9 @@ export const register: Register = on => {
           </Box>
         )}
 
-        {/* Rule between the agents and the files: a one-row box clips the overflow, so no wrap and no ellipsis. */}
-        <Box marginTop={1} height={1} overflow="hidden">
-          <Text dimColor>
-            {'─'.repeat(400)}
-          </Text>
-        </Box>
-        <Box flexDirection="row" gap={1} marginTop={1} marginBottom={1} alignItems="center">
-          <Box borderStyle="round" borderDimColor paddingX={1}>
+        {/* No rule between the agents and the files: the cards and the framed title already part them. */}
+        <Box flexDirection="row" gap={1} marginTop={3} marginBottom={1} alignItems="center">
+          <Box borderStyle="round" borderColor="promptBorder" paddingX={1}>
             <Text bold>{t.filesTitle}</Text>
           </Box>
           <Text dimColor>{shownFiles.length}</Text>
@@ -690,9 +761,15 @@ export const register: Register = on => {
                 key="files-search"
                 placeholder={t.searchPlaceholder}
                 value={search}
-                submitLabel="↵"
+                submitLabel="✕"
                 autoFocus
-                onSubmit={(v: string) => void update($, query, () => v.trim())}
+                // The tree filters as you type; the text is kept as typed so the field never fights the cursor.
+                onInput={(v: string) => void update($, query, () => v)}
+                // Enter, or its ✕ beside the field, closes the search, as the magnifier pressed again.
+                onSubmit={() => {
+                  void update($, searching, () => false)
+                  void update($, query, () => '')
+                }}
               />
             </Box>
           )}
@@ -717,7 +794,7 @@ export const register: Register = on => {
         </Box>
         {chosen.length > 0 && (
           <Box flexDirection="row" gap={1} marginBottom={1}>
-            <Text color={RUN}>
+            <Text color={orange}>
               {t.attached(chosen.length)}
             </Text>
             <Box flexGrow={1} />
@@ -761,7 +838,7 @@ export const register: Register = on => {
                   {marks[r.touch.path.toLowerCase()]}
                 </Text>
               )}
-              {chosen.includes(r.touch.path) && <Text color={RUN}>{t.attachedTag}</Text>}
+              {chosen.includes(r.touch.path) && <Text color={orange}>{t.attachedTag}</Text>}
               {r.touch.agents.length > 1 && <Text dimColor>{r.touch.agents.length} agents</Text>}
             </Box>
           ),
