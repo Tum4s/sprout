@@ -146,13 +146,13 @@ const TWINKLES = Array.from(
 // Fast rise, slower fall, as measured on the app's slider (~150 ms up, ~300 ms down).
 const TWINKLE_CSS = `<style>${TWINKLES}@keyframes tw{0%,60%{fill-opacity:.75}66%{fill-opacity:1}85%,100%{fill-opacity:.75}}@media (prefers-reduced-motion: reduce){rect{animation:none}}</style>`
 
-// A light theme: see-through dots wash out on white, so lit dots (the ones with an `opacity`) fill solid and fade
-// in by column tenths, .g0 at 50% to .g9 at 100%, keeping the dark theme's left-to-right ramp; the track gets
-// darker, Claude's orange and the done green deeper. A live bar's twinkle still animates its fill-opacity.
+// A light theme: see-through dots wash out on white, so lit dots fill solid and fade in by column tenths, .g0 at 50%
+// to .g9 at 100%, keeping the dark theme's left-to-right ramp; the track gets darker, Claude's orange and the done
+// green deeper. A live bar's twinkle still animates its fill-opacity.
 const LIGHT_RAMP = Array.from({ length: 10 }, (_, i) => `.g${i}{opacity:${(0.5 + i / 18).toFixed(2)}}`).join('')
-const LIGHT_CSS =
-  `<style>@media (prefers-color-scheme: light){rect[opacity]{fill-opacity:1}${LIGHT_RAMP}rect:not([opacity]){fill-opacity:.3}` +
-  '[fill="#d97757"]{fill:#c4572f}[fill="#7fb88f"]{fill:#3f8f5a}}</style>'
+const LIGHT_FILL: Record<string, string> = { '#d97757': '#c4572f', '#7fb88f': '#3f8f5a' }
+// A dot's opacity, in twentieths: one class each instead of an attribute on every dot.
+const OPACITIES = Array.from({ length: 21 }, (_, i) => `.o${i}{opacity:${i / 20}}`).join('')
 
 /** Git's own word for a file, from `git status --porcelain -z`: modified, added, untracked or deleted. */
 export type GitMark = 'M' | 'A' | 'U' | 'D'
@@ -192,26 +192,32 @@ export function dotBarSvg(ratio: number, color: string, isLive: boolean, seed: s
     return ((h ^= h >>> 16) >>> 0) / 4294967296
   }
   const lit = Math.round(Math.max(0, Math.min(1, ratio)) * cols)
-  const size = DOT.toFixed(2)
+  // Compact markup: what every dot shares (size, colour, fill opacity) sits in the style once, so a dot is its place
+  // and its classes. A pane's drawing is capped at 100,000 characters, and a wide bar has hundreds of dots.
+  // l: a lit dot; t: the track; g<n>: the column's tenth, for the light theme's ramp; o<n>: the dot's opacity;
+  // k<n>: one of the twinkle rhythms while live.
   let dots = ''
   for (let c = 0; c < cols; c++) {
     const base = 0.45 + 0.4 * (c / Math.max(1, cols - 1))
     for (let r = 0; r < rows; r++) {
-      const at = `x="${(c * PITCH).toFixed(2)}" y="${(r * PITCH).toFixed(2)}" width="${size}" height="${size}"`
+      const at = `x="${(c * PITCH).toFixed(1)}" y="${(r * PITCH).toFixed(1)}"`
       if (c >= lit) {
-        dots += `<rect ${at} fill="${track}" fill-opacity="0.18"/>`
+        dots += `<rect ${at} class="t"/>`
         continue
       }
-      const opacity = (base * (0.85 + 0.3 * rnd())).toFixed(2)
-      // g<n>: the column's tenth, for the light theme's ramp; k<n>: one of the twinkle rhythms while live.
+      const opacity = Math.round(base * (0.85 + 0.3 * rnd()) * 20)
       const ramp = `g${Math.min(9, Math.floor((c / cols) * 10))}`
-      const classes = isLive ? `${ramp} k${Math.floor(rnd() * 10)}` : ramp
-      dots += `<rect ${at} fill="${color}" opacity="${opacity}" fill-opacity="0.70" class="${classes}"/>`
+      const classes = isLive ? `l ${ramp} o${opacity} k${Math.floor(rnd() * 10)}` : `l ${ramp} o${opacity}`
+      dots += `<rect ${at} class="${classes}"/>`
     }
   }
   const w = dotBarWidth(cols)
   const height = dotBarHeight(rows)
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${height}" viewBox="0 0 ${w} ${height}">${isLive ? TWINKLE_CSS : ''}${LIGHT_CSS}${dots}</svg>`
+  const size = DOT.toFixed(2)
+  const style =
+    `<style>rect{width:${size}px;height:${size}px}.l{fill:${color};fill-opacity:.7}.t{fill:${track};fill-opacity:.18}${OPACITIES}` +
+    `@media (prefers-color-scheme: light){.l{fill:${LIGHT_FILL[color] ?? color};fill-opacity:1}${LIGHT_RAMP}.t{fill-opacity:.3}}</style>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${height}" viewBox="0 0 ${w} ${height}">${style}${isLive ? TWINKLE_CSS : ''}${dots}</svg>`
 }
 
 /** Terminal fallback: filled and empty half blocks for a bar `width` cells wide. */

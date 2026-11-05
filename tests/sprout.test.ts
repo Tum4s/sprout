@@ -33,7 +33,8 @@ async function session($: any, on: any, language = 'français') {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('agent.spawn', ($: any, e: any) => {
     spawned.push(e.prompt)
-    return { model: 'claude-sonnet-5-5', agentId: e.description === 'Second' ? 'ag2' : 'ag1' }
+    // A 'Crowd' agent gets its own id, for the tests that need several cards.
+    return { model: 'claude-sonnet-5-5', agentId: e.description.startsWith('Crowd') ? e.description : e.description === 'Second' ? 'ag2' : 'ag1' }
   })
   on('tool.call', () => ({ result: 'ok' }))
   on('turn.complete', () => ({ text: '' }))
@@ -102,7 +103,7 @@ test('a running agent shows in the band, with its steps, files and the pane', as
     expect(await pane.find({ type: 'Text', text: 'Lecture des specs' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'lecture' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: '1/4 étapes' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: /^104k tk {2}· {2}≈\$0\.\d\d {2}· {2}0:03$/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^104k traités {2}· {2}≈\$0\.\d\d {2}· {2}0:03$/ })).toBeDefined()
     // Totals in tiles, the running agent under its section.
     expect(await pane.find({ type: 'Text', text: '1/1 en cours' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'Coût total' })).toBeDefined()
@@ -141,6 +142,22 @@ test('without reported steps, a running bar shows the context fill', async ($, o
   const alts = (await pane.findAll({ type: 'Svg' })).map(s => String(s.props.alt))
   await pane.unmount()
   expect(alts).toContain('10%')
+})
+
+test('the pane stays under the engine drawing limit, however wide and however many agents', async ($, on) => {
+  await session($, on)
+  for (const d of ['Crowd1', 'Crowd2', 'Crowd3', 'Crowd4', 'Crowd5', 'Crowd6']) {
+    await spawn($, d, 'tu-' + d)
+    await step($, d)
+    await ($ as any).tool.call({ tool: 'mcp__sprout__step', agentId: d, done: 1, total: 5, note: 'reading' })
+  }
+  for (const bodyColumns of [30, 60, 100, 200]) {
+    const pane = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'desktop' })
+    const svgs = await pane.findAll({ type: 'Svg' })
+    await pane.unmount()
+    // The drawing is capped at 100,000 characters; the SVG sources are by far its largest part.
+    expect(svgs.reduce((sum, x) => sum + String(x.props.source).length, 0)).toBeLessThan(80_000)
+  }
 })
 
 test('a card bar follows the pane width, within bounds', async ($, on) => {

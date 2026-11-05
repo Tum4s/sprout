@@ -41,6 +41,9 @@ const BAND_ROWS = 5
 const CARD_COLS_PER_CELL = 1.3
 const CARD_COLS_MIN = 40
 const CARD_COLS_MAX = 220
+// All the cards' dots together, so the pane's drawing stays under the engine's 100,000 characters (about 45 a dot):
+// with many cards the bars stop growing sooner.
+const CARD_DOTS_MAX = 1200
 const CARD_ROWS = 4
 // A file touched this recently is drawn at full strength, the others dim.
 const RECENT_MS = 5_000
@@ -522,7 +525,6 @@ export const register: Register = on => {
     const isSearching = await read($, searching)
     const marks = await read($, git)
     const at = await read($, now)
-    const cardCols = Math.max(CARD_COLS_MIN, Math.min(CARD_COLS_MAX, Math.round(e.props.bodyColumns * CARD_COLS_PER_CELL)))
 
     if (list.length === 0) {
       return (
@@ -536,6 +538,10 @@ export const register: Register = on => {
     const running = list.filter(a => a.status === 'running').sort((a, b) => b.startedAt - a.startedAt)
     const finished = list.filter(a => a.status !== 'running').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
     const shown = [...running, ...finished].slice(0, MAX_CARDS)
+    const cardCols = Math.max(
+      CARD_COLS_MIN,
+      Math.min(CARD_COLS_MAX, Math.round(e.props.bodyColumns * CARD_COLS_PER_CELL), Math.floor(CARD_DOTS_MAX / (CARD_ROWS * shown.length))),
+    )
     const hidden = list.length - shown.length
     const shownRunning = shown.filter(a => a.status === 'running')
     const shownFinished = shown.filter(a => a.status !== 'running')
@@ -589,7 +595,8 @@ export const register: Register = on => {
             : t.done
       const steps = a.stepTotal ? t.steps(a.stepDone ?? 0, a.stepTotal) : ''
       const facts = [
-        a.tokens ? `${fmtTokens(a.tokens)} tk` : '',
+        // Every request's whole context, summed: what the agent had processed, and what its cost comes from.
+        a.tokens ? t.processed(fmtTokens(a.tokens)) : '',
         fmtCost(a.costUsd),
         fmtTime(elapsed(a, at)),
       ].filter(Boolean)

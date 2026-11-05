@@ -100,6 +100,7 @@ It also adds text to what Claude reads:
 ## Known limits
 
 - **Cost is an estimate**: Anthropic's official price table read on 2026-10-09 (`hooks/model.ts`), cache writes at the 1-hour rate (the real duration is not exposed). A model outside the table shows no cost.
+- **Tokens are tokens processed**: each request's whole context, cached part included, summed over the agent's run. That is what its cost comes from, and it runs well above the context size Claude Code reports for a subagent.
 - **The grey context bar** fills only when the agent runs on the session's model (the only context window the API exposes).
 - Grep / Glob / Bash show as the "last action", not in the tree.
 - The SVG drawings (dot bars, mascot) exist in the desktop app only; the terminal draws `▄` block bars.
